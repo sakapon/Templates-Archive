@@ -1,0 +1,201 @@
+﻿@using WebMatrix.WebData
+
+@* バンドルを使用している場合はこのセクションを削除します *@
+@section Scripts {
+    <script src="~/Scripts/jquery.validate.min.js"></script>
+    <script src="~/Scripts/jquery.validate.unobtrusive.min.js"></script>
+}
+
+@{
+    WebSecurity.RequireAuthenticatedUser();
+
+    Layout = "~/_SiteLayout.cshtml";
+    Page.Title = "アカウントの管理";
+
+    var action = Request.Form["action"];
+
+    bool hasLocalAccount = OAuthWebSecurity.HasLocalAccount(WebSecurity.CurrentUserId);
+
+    string successMessage = "";
+    var message = Request.QueryString["message"];
+    if (message == "ChangedPassword") {
+        successMessage = "パスワードが変更されました。";
+    } else if (message == "SetPassword") {
+        successMessage = "パスワードが設定されました。";
+    } else if (message == "RemovedLogin") {
+        successMessage = "外部ログインが削除されました。";
+    }
+
+    var externalLogins =
+        (from account in OAuthWebSecurity.GetAccountsFromUserName(WebSecurity.CurrentUserName)
+         let clientData = OAuthWebSecurity.GetOAuthClientData(account.Provider)
+         select new { Provider = account.Provider, ProviderDisplayName = clientData.DisplayName, UserId = account.ProviderUserId })
+        .ToList();
+    bool canRemoveLogin = externalLogins.Count > 1 || hasLocalAccount;
+
+    // セットアップ検証
+    if (hasLocalAccount) {
+        Validation.RequireField("currentPassword", "現在のパスワード フィールドは必須入力項目です。");
+        Validation.Add("currentPassword",
+            Validator.StringLength(
+                maxLength: Int32.MaxValue,
+                minLength: 6,
+                errorMessage: "現在のパスワードは 6 文字以上にする必要があります"));
+    }
+    Validation.RequireField("newPassword", "新しいパスワード フィールドは必須入力項目です。");
+    Validation.Add("confirmPassword",
+        Validator.Required("新しいパスワードの確認入力フィールドは必須入力項目です。"),
+        Validator.EqualsTo("newPassword", "新しいパスワードと確認のパスワードが一致しません。"));
+    Validation.Add("newPassword",
+        Validator.StringLength(
+            maxLength: Int32.MaxValue,
+            minLength: 6,
+            errorMessage: "新しいパスワードは 6 文字以上にする必要があります"));
+
+    if (IsPost) {
+        AntiForgery.Validate();
+        if (action == "password") {
+            // ローカル アカウントのパスワード操作の処理
+            var currentPassword = Request.Form["currentPassword"];
+            var newPassword = Request.Form["newPassword"];
+            var confirmPassword = Request.Form["confirmPassword"];
+
+            if (Validation.IsValid()) {
+                if (hasLocalAccount) {
+                    if (WebSecurity.ChangePassword(WebSecurity.CurrentUserName, currentPassword, newPassword)) {
+                        Response.Redirect("~/Account/Manage?message=ChangedPassword");
+                        return;
+                    } else {
+                        ModelState.AddFormError("パスワードの変更中にエラーが発生しました。サイトの所有者に連絡してください。");
+                    }
+                } else {
+                    bool requireEmailConfirmation = !WebMail.SmtpServer.IsEmpty();
+                    try {
+                        WebSecurity.CreateAccount(WebSecurity.CurrentUserName, newPassword, requireEmailConfirmation);
+                        Response.Redirect("~/Account/Manage?message=SetPassword");
+                        return;
+                    } catch (System.Web.Security.MembershipCreateUserException e) {
+                        ModelState.AddFormError(e.Message);
+                    }
+                }
+            } else {
+                ModelState.AddFormError("パスワードの変更に失敗しました。エラーを修正し、再試行してください。");
+            }
+        } else if (action == "removeLogin") {
+            // 外部ログインの削除
+            var provider = Request.Form["provider"];
+            var userId = Request.Form["userId"];
+
+            message = null;
+            var ownerAccount = OAuthWebSecurity.GetUserName(provider, userId);
+            // 現在ログインしているユーザーが外部ログインの所有者であり、外部ログインがユーザーの前回のログイン資格情報ではない場合にのみ、その外部ログインを削除します
+            if (ownerAccount == WebSecurity.CurrentUserName && canRemoveLogin) {
+                OAuthWebSecurity.DeleteAccount(provider, userId);
+                message = "RemovedLogin";
+            }
+            Response.Redirect(Href("~/Account/Manage", new { message }));
+            return;
+        } else {
+            // これが外部ログイン リクエストの場合
+            string provider = Request.Form["provider"];
+            if (!provider.IsEmpty()) {
+                OAuthWebSecurity.RequestAuthentication(provider, Href("~/Account/RegisterService", new { returnUrl = Href("~/Account/Manage") }));
+                return;
+            }
+        }
+    }
+}
+<hgroup class="title">
+    <h1>@Page.Title.</h1>
+</hgroup>
+
+@if (!successMessage.IsEmpty()) {
+    <p class="message-success">
+        @successMessage
+    </p>
+}
+
+<p><strong>@WebSecurity.CurrentUserName</strong> としてログインしています。 </p>
+
+@if (hasLocalAccount) {
+    <h3>パスワードの変更</h3>
+} else {
+    <p>
+        このサイトのローカル パスワードがありません。外部ログインなしでログインできるように、ローカル パスワードを追加してください。
+    </p>
+}
+
+<form method="post">
+    @AntiForgery.GetHtml()
+    @Html.ValidationSummary(excludeFieldErrors: true)
+
+    <fieldset>
+        <legend>
+        @if (hasLocalAccount) {
+            <text>パスワード変更のフォーム</text>
+        } else {
+            <text>パスワード設定のフォーム</text>
+        }
+        </legend>
+        <ol>
+            @if (hasLocalAccount) {
+                <li class="current-password">
+                    <label for="currentPassword" @if (!ModelState.IsValidField("currentPassword")) {<text>class="error-label"</text>}>現在のパスワード</label>
+                    <input type="password" id="currentPassword" name="currentPassword" @Validation.For("currentPassword")/>
+                    @Html.ValidationMessage("currentPassword")
+                </li>
+            }
+            <li class="new-password">
+                <label for="newPassword" @if (!ModelState.IsValidField("newPassword")) {<text>class="error-label"</text>}>新しいパスワード</label>
+                <input type="password" id="newPassword" name="newPassword" @Validation.For("newPassword")/>
+                @Html.ValidationMessage("newPassword")
+            </li>
+            <li class="confirm-password">
+                <label for="confirmPassword" @if (!ModelState.IsValidField("confirmPassword")) {<text>class="error-label"</text>}>新しいパスワードの確認入力</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" @Validation.For("confirmPassword")/>
+                @Html.ValidationMessage("confirmPassword")
+            </li>
+        </ol>
+        @if (hasLocalAccount) {
+            <button type="submit" name="action" value="password">パスワードの変更</button>
+            <p>
+                パスワードを忘れた場合は、<a href="~/Account/ForgotPassword" title="パスワードを忘れた場合のページ">ここをクリック</a>してください。
+            </p>
+        } else {
+            <button type="submit" name="action" value="password">パスワードの設定</button>
+        }
+    </fieldset>
+</form>
+
+<section id="externalLogins">
+    @if (externalLogins.Count > 0) {
+        <h3>登録されている外部ログイン</h3>
+        <table>
+            <tbody>
+            @foreach (var externalLogin in externalLogins) {
+                <tr>
+                    <td>@externalLogin.ProviderDisplayName</td>
+                    <td>
+                        @if (canRemoveLogin) {
+                            <form method="post">
+                                @AntiForgery.GetHtml()
+                                <fieldset>
+                                    <legend></legend>
+                                    <input type="hidden" name="provider" value="@externalLogin.Provider" />
+                                    <input type="hidden" name="userId" value="@externalLogin.UserId" />
+                                    <button type="submit" name="action" value="removeLogin" title="この @externalLogin.ProviderDisplayName 資格情報をアカウントから削除してください">削除</button>
+                                </fieldset>
+                            </form>
+                        } else {
+                            @: &nbsp;
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+
+    <h3>外部ログインの追加</h3>
+    @RenderPage("~/Account/_ExternalLoginsList.cshtml")
+</section>

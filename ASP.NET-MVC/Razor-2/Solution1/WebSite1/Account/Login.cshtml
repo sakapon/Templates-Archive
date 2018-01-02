@@ -1,0 +1,104 @@
+﻿@* バンドルを使用している場合はこのセクションを削除します *@
+@section Scripts {
+    <script src="~/Scripts/jquery.validate.min.js"></script>
+    <script src="~/Scripts/jquery.validate.unobtrusive.min.js"></script>
+}
+
+@{
+    Layout = "~/_SiteLayout.cshtml";
+    Page.Title = "ログイン";
+
+    // 全般的なページ変数を初期化します
+    var email = "";
+    var password = "";
+    var rememberMe = false;
+
+    var returnUrl = Request.QueryString["ReturnUrl"];
+    if (returnUrl.IsEmpty()) {
+        // 一部の外部ログイン プロバイダーは常に URL の戻り値を必要とします
+        returnUrl = Href("~/");
+    }
+
+    // Setup validation
+    Validation.RequireField("email", "電子メール アドレスを入力してください。");
+    Validation.RequireField("password", "パスワードを入力してください。");
+    Validation.Add("password",
+        Validator.StringLength(
+            maxLength: Int32.MaxValue,
+            minLength: 6,
+            errorMessage: "パスワードは 6 文字以上にする必要があります"));
+
+    // これが POST 要求の場合、データを検証して処理します
+    if (IsPost) {
+        AntiForgery.Validate();
+        // これが外部ログイン リクエストの場合
+        string provider = Request.Form["provider"];
+        if (!provider.IsEmpty()) {
+            OAuthWebSecurity.RequestAuthentication(provider, Href("~/Account/RegisterService", new { returnUrl }));
+            return;
+        } else if (Validation.IsValid()) {
+            email = Request.Form["email"];
+            password = Request.Form["password"];
+            rememberMe = Request.Form["rememberMe"].AsBool();
+
+            if (WebSecurity.UserExists(email) && WebSecurity.GetPasswordFailuresSinceLastSuccess(email) > 4 && WebSecurity.GetLastPasswordFailureDate(email).AddSeconds(60) > DateTime.UtcNow) {
+                Response.Redirect("~/Account/AccountLockedOut");
+                return;
+            }
+
+            // 指定された資格情報を使用してログインを試みます
+            if (WebSecurity.Login(email, password, rememberMe)) {
+                Context.RedirectLocal(returnUrl);
+                return;
+            } else {
+                ModelState.AddFormError("指定されたユーザー名またはパスワードが正しくありません。");
+            }
+        }
+    }
+}
+
+<hgroup class="title">
+    <h1>@Page.Title.</h1>
+</hgroup>
+
+<section id="loginForm">
+    <h2>ローカル アカウントを使用してログインします。</h2>
+    <form method="post">
+        @AntiForgery.GetHtml()
+        @* 検証エラーが 1 つ以上存在する場合、エラーが表示されます *@
+        @Html.ValidationSummary("ログインに失敗しました。エラーを修正し、再試行してください.", excludeFieldErrors: true, htmlAttributes: null)
+
+        <fieldset>
+            <legend>アカウントにログインします</legend>
+            <ol>
+                <li class="email">
+                    <label for="email" @if (!ModelState.IsValidField("email"))
+                                       {<text>class="error-label"</text>}>電子メール アドレス</label>
+                    <input type="text" id="email" name="email" value="@email" @Validation.For("email")/>
+                    @* ユーザー名検証エラーをページに書き込みます *@
+                    @Html.ValidationMessage("email")
+                </li>
+                <li class="password">
+                    <label for="password" @if (!ModelState.IsValidField("password")) {<text>class="error-label"</text>}>パスワード</label>
+                    <input type="password" id="password" name="password" @Validation.For("password")/>
+                    @* パスワード検証エラーをページに書き込みます *@
+                    @Html.ValidationMessage("password")
+                </li>
+                <li class="remember-me">
+                    <input type="checkbox" id="rememberMe" name="rememberMe" value="true" checked="@rememberMe" />
+                    <label class="checkbox" for="rememberMe">このアカウントを記憶する</label>
+                </li>
+            </ol>
+            <input type="submit" value="ログイン" />
+        </fieldset>
+    </form>
+    <p>
+        <a href="~/Account/Register">アカウントを作成していない場合</a>
+        <a href="~/Account/ForgotPassword">パスワードを忘れた場合</a>
+    </p>
+</section>
+
+<section class="social" id="socialLoginForm">
+    <h2>別のサービスを使用してログインします.</h2>
+    @RenderPage("~/Account/_ExternalLoginsList.cshtml")
+</section>
