@@ -8,7 +8,7 @@ An archive for project templates.
 - [5.2.2 (VS 2013)](ASP.NET-MVC/MVC-5.2.2/Solution1)
 
 ## ASP.NET Web Pages
-- [Razor 2 (VS 2012)](ASP.NET-MVC/Razor-2/Solution1)
+- [2 (VS 2012)](ASP.NET-MVC/Razor-2/Solution1)
 
 ## ASP.NET Web API
 - [5.2.3 (VS 2017)](ASP.NET-Web-API/Web-API-5.2.3/Solution1)
